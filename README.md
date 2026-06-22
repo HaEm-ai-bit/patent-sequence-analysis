@@ -1,177 +1,260 @@
-# 专利序列挖掘工具
+# 蛋白序列/突变位点 专利规避工作流
 
-从 Catalyst+ API 提取指定靶点的生物序列数据，用于专利无效化分析。
+根据蛋白关键词匹配相关专利，提取专利中蛋白序列的突变位点，区分受保护与不受保护，提供风险筛查与规避建议。
 
 ---
 
 ## 核心功能
 
-1. **时间分片查询** — 自动突破 API 100 条/页限制，按时间段切割重查
-2. **ST.26 序列提取** — 从标准化序列表（`<223>` 标签）精确提取，准确率 100%
-3. **LLM 辅助验证** — 对无标签序列调用 qwen-turbo 判断角色和相关性
-4. **裸序列提取** — 从专利正文提取未格式化的氨基酸序列，经 LLM 验证后分级入档
-5. **破专利建议** — 自动生成风险等级（高/中/低）和行动建议
-6. **三档 CSV 输出** — 完整版 / 高可信度版 / LLM 验证版
+### Step 1：知识库构建
+
+根据蛋白关键词（如 EGFR、TLR2）搜索相关专利，提取两类信息并构建本地知识库：
+
+- **完整蛋白序列**：ST.26 序列表 / SEQ ID NO 引用 / 裸序列提取
+- **突变位点**：从专利文本中提取突变描述（E484K、Glu484Lys 等多种格式）
+
+每条序列和突变都标注了：
+- `location`：出现在 claims 还是 description 中
+- `protected`：是否受专利保护（granted + claims = 受保护）
+- 风险等级：high / medium / low / safe
+
+知识库自动缓存到本地，相同关键词不重复查询 API。
+
+### Step 2：风险筛查
+
+两种输入形式：
+
+| 输入形式 | 流程 |
+|---------|------|
+| **输入完整蛋白序列** | 序列比对 → 确认同源 → 逐位点比较 → 检查突变是否命中受保护位点 → 输出风险报告 |
+| **输入突变位点列表** | 直接在知识库中查找 → 检查是否受保护 → 输出风险报告 |
+
+如果知识库中没有该蛋白的数据，自动触发 Step 1 建库。
+
+### 风险判定矩阵
+
+| 专利状态 | 序列/突变位置 | protected | 风险等级 | 含义 |
+|---------|-------------|-----------|---------|------|
+| granted | claims | ✅ true | ⛔ high | 已获批+权利要求保护，**必须规避** |
+| granted | description | false | ⚠️ medium | 已获批但仅提及，可用需注意 |
+| pending | claims | false | 🔶 medium | 审查中+权利要求保护，有风险 |
+| pending | description | false | ✅ low | 审查中且仅提及，可用 |
+| abandoned/expired/withdrawn | any | false | ✅ safe | 无风险 |
 
 ---
 
 ## 快速开始
 
+### 安装依赖
+
 ```bash
-# 安装依赖
-pip install requests
-
-# 查询单个靶点（TLR2，全量）
-python query_patent.py --targets TLR2 --max-pages 5
-
-# 查询多个靶点
-python query_patent.py --targets TLR2 CD318 --max-pages 10
-
-# 指定时间范围
-python query_patent.py --targets TLR2 --start 2020-01-01 --end 2025-12-31
+pip install requests biopython
 ```
 
-### 参数说明
+### 配置 API 凭证
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--targets` | — | 靶点名称，支持多个（空格分隔） |
-| `--max-pages` | 5 | 每关键词最大查询页数 |
-| `--output-dir` | outputs/ | 结果输出目录 |
-| `--start` | 1900-01-01 | 查询起始日期 |
-| `--end` | 今天 | 查询截止日期 |
-| `--no-llm` | — | 禁用 LLM 验证（仅规则提取） |
+设置环境变量：
+
+```bash
+export CATALYST_ACCESS_KEY="your_access_key"
+export CATALYST_ACCESS_SECRET="your_access_secret"
+```
+
+### 命令行使用
+
+```bash
+# Step 1: 构建知识库
+python run.py build-kb --target EGFR
+
+# Step 1: 查询受保护位点
+python run.py query --target EGFR
+
+# Step 2: 风险筛查（输入序列）
+python run.py screen --sequence "MTEYKLVVLGAVGVGKSALT..." --target EGFR
+
+# Step 2: 风险筛查（输入突变位点）
+python run.py screen --mutations E484K,N501Y --target EGFR
+
+# 强制重建知识库（忽略缓存）
+python run.py build-kb --target EGFR --force
+
+# 保存结果到文件
+python run.py screen --mutations E484K --target EGFR -o report.json
+```
+
+### Python 直接调用
+
+```python
+from src.kb_builder import build_knowledge_base, query_protected_sites
+from src.risk_screener import screen_risk
+
+# Step 1: 构建知识库（有缓存，相同关键词不重复查）
+kb = build_knowledge_base(target="EGFR")
+
+# Step 1 的 agent 接口：查询某蛋白受保护的位点
+protected = query_protected_sites(target="EGFR")
+
+# Step 2: 风险筛查（输入序列）
+report = screen_risk(query_sequence="MTEYKLVVLGAVGVGKSALT...", target="EGFR")
+
+# Step 2: 风险筛查（输入突变位点）
+report = screen_risk(mutations=["E484K", "N501Y"], target="EGFR")
+```
+
+### Skill 调用（供 macroflow 集成）
+
+```python
+from skill import run_skill
+
+# 构建知识库
+result = run_skill({"action": "build_kb", "target": "EGFR"})
+
+# 查询受保护位点
+result = run_skill({"action": "query_protected", "target": "EGFR"})
+
+# 风险筛查
+result = run_skill({"action": "screen_risk", "query_sequence": "MTEY...", "target": "EGFR"})
+result = run_skill({"action": "screen_risk", "mutations": ["E484K", "N501Y"], "target": "EGFR"})
+```
 
 ---
 
 ## 项目结构
 
 ```
-zhuanliAPI/
-├── query_patent.py          # 主程序（单一入口）
-├── README.md
-├── scripts/
-│   ├── merge_and_clean.py   # 合并多次查询的 CSV，去重
-│   └── download_pdfs.py     # 按专利号批量下载 PDF
-└── outputs/                 # 运行结果（每次运行生成带时间戳的文件）
-    ├── <target>_patent_sequences_<ts>.csv               # 完整版
-    ├── <target>_patent_sequences_<ts>_high_confidence.csv  # 高可信度版
-    ├── <target>_patent_sequences_<ts>_llm_verified.csv  # LLM验证版
-    └── patent_antibody_result_<ts>.json                 # 原始 API 数据
+patent-sequence-analysis-main/
+├── README.md                   # 本文档
+├── PLAN.md                     # 开发计划
+├── CLAUDE.md                   # 项目配置
+│
+├── src/                        # 核心模块
+│   ├── __init__.py             # 公共 API 导出
+│   ├── api_client.py           # Catalyst+ API 客户端（签名、搜索、详情）
+│   ├── sequence_extractor.py   # 序列提取（ST.26/SEQ ID NO/裸序列 + location 判断）
+│   ├── mutation_extractor.py   # 突变位点提取（6种格式 + location 判断）
+│   ├── kb_builder.py           # Step1: 知识库构建 + 缓存 + agent 查询接口
+│   ├── risk_screener.py        # Step2: 风险筛查（序列/突变两种输入）
+│   ├── alignment.py            # 序列比对（Biopython pairwise alignment）
+│   └── utils.py                # 通用工具函数
+│
+├── skill.py                    # Skill 接口，供 macroflow 调用
+├── run.py                      # 命令行入口
+│
+├── knowledge_base/             # 知识库 JSON 缓存目录
+└── archive/                    # 旧版 v3.2 代码与历史数据（保留参考）
 ```
 
----
+### 模块职责
 
-## 序列提取逻辑
-
-```
-专利详情
-  ├── 1. ST.26 序列表（descriptions 字段）
-  │       └── 有 <223> 标签 → 直接识别角色，confidence = 高（ST.26序列表）
-  │
-  ├── 2. SEQ ID NO 引用（claims/abstracts/descriptions）
-  │       └── "SEQ ID NO:X SEQUENCE" 格式 → confidence = 中（SEQ ID NO引用）
-  │
-  └── 3. 裸 AA 序列（新增）
-          └── 连续氨基酸字符串（>=12aa），需含稀有氨基酸(W/Y/H/F/Q)
-              且出现在 antibody/VH/VL/CDR/polypeptide 等关键词附近
-              → confidence = 低（裸序列）
-
-↓ LLM 验证（针对无角色信息的序列）
-
-验证策略：
-  - ST.26 无 <223>           → LLM 验证
-  - ST.26 有 <223> 但未识别  → LLM 验证
-  - SEQ ID NO 序列           → LLM 验证
-  - 裸序列                   → LLM 验证
-
-LLM 验证结果分流：
-  - 非裸序列 + LLM 高置信  → confidence = 中（LLM验证-高置信）→ 所有 CSV
-  - 非裸序列 + LLM 中置信  → confidence = 中（LLM验证）       → 完整 + llm_verified
-  - 裸序列 + LLM 高置信    → confidence = 中（LLM验证-高置信）→ 所有 CSV
-  - 裸序列 + LLM 中/低置信 → confidence = 低（LLM验证-低置信）→ 仅完整 CSV
-```
-
----
-
-## 输出 CSV 字段
-
-| 字段 | 说明 |
+| 模块 | 职责 |
 |------|------|
-| target | 靶点名称 |
-| patent_id | 专利号 |
-| sequence | 序列字符串 |
-| seq_role | 序列角色（CDR3 / VH / VL / siRNA / 引物…） |
-| break_relevance | 破专利相关性：高 / 中 / 低 |
-| break_guide | 具体破专利行动建议 |
-| confidence_level | 可信度等级（见下表） |
-| final_recommendation | 综合结论（含风险标识） |
-| llm_verified | LLM 验证状态：是 / 低置信 / 失败 / （空） |
-| llm_confidence | LLM 置信度 |
-| llm_reasoning | LLM 判断依据（50字以内） |
-| seq_type | AA（氨基酸）/ NT（核酸） |
-| seq_context | 序列在原文中的上下文 |
-| feature_desc | ST.26 的 `<223>` 标签内容 |
-| status_label | 专利状态：有效 / 审查中 / 已放弃 / 已到期 |
-| action_note | 整体破专利建议（按专利状态） |
-
-### 可信度等级
-
-| 等级 | 含义 | 进入哪些 CSV |
-|------|------|-------------|
-| 高（ST.26序列表） | ST.26 标准格式，有 `<223>` 标签 | 全部 |
-| 高（ST.26+LLM验证） | ST.26 无标签，经 LLM 高置信验证 | 全部 |
-| 中（LLM验证-高置信） | LLM 高置信验证通过 | 全部 |
-| 中（LLM验证） | LLM 中置信验证通过 | 完整 + llm_verified |
-| 中（SEQ ID NO引用） | 有 SEQ ID NO 引用，等待验证 | 完整 |
-| 低（LLM验证-低置信） | 裸序列，LLM 中/低置信 | 仅完整 |
-| 低（裸序列） | 裸序列，LLM 失败或未验证 | 仅完整 |
+| `api_client.py` | 封装 Catalyst+ API（签名、分页、时间分片、详情获取） |
+| `sequence_extractor.py` | 从专利详情 JSON 中提取完整序列，判断 location（claims/description） |
+| `mutation_extractor.py` | 从专利文本中提取突变位点描述（E484K 等多种格式），判断 location |
+| `kb_builder.py` | 组合 api_client + sequence_extractor + mutation_extractor，构建知识库，提供查询接口 |
+| `risk_screener.py` | 在知识库上做风险筛查（序列比对 / 突变查询），知识库无数据时自动触发建库 |
+| `alignment.py` | 序列比对，返回 identity、对齐结果、差异位点 |
+| `skill.py` | 统一对外接口：`build_kb` / `query_protected` / `screen_risk` |
 
 ---
 
-## 配置
+## 突变位点提取格式
 
-在 `query_patent.py` 顶部修改：
+支持从专利文本中提取以下格式的突变描述：
 
-```python
-# 靶点关键词映射（同一蛋白的多个名称）
-TARGET_KEYWORD_GROUPS = {
-    "TLR2": ["TLR2"],
-    "CD318": ["CD318", "CDCP1"],
+| 格式 | 示例 | 匹配正则 |
+|------|------|---------|
+| 标准单字母 | `E484K` | `[A-Z]\d+[A-Z]` |
+| 三字母码 | `Glu484Lys` | 三字母+数字+三字母 |
+| position 描述 | `position 484 Glu→Lys` | position + 数字 + AA + 箭头 + AA |
+| 数字开头 | `484E→K` / `484E/K` | 数字+AA+分隔符+AA |
+| 中文格式 | `第484位谷氨酸替换为赖氨酸` | 中文数字+位+AA+替换为+AA |
+| substitution 句式 | `substitution of Glu at position 484 with Lys` | substitution...of...at...with |
+
+---
+
+## 知识库 JSON 结构
+
+```json
+{
+  "target": "EGFR",
+  "build_time": "2026-06-22T10:00:00",
+  "total_patents_searched": 200,
+  "patents_with_data": 15,
+  "patents": [
+    {
+      "patent_id": "US2020123456A1",
+      "title": "Anti-EGFR antibody...",
+      "status": "granted",
+      "publication_date": "2020-03-15",
+      "assignees": ["Company A"],
+      "sequences": [
+        {
+          "seq_id": "1",
+          "sequence": "MTEYKLVVVGAVGVGKSALT...",
+          "seq_type": "AA",
+          "length": 170,
+          "source": "ST.26",
+          "location": "claims",
+          "protected": true,
+          "role": "目标蛋白变体"
+        }
+      ],
+      "mutations": [
+        {
+          "position": 484,
+          "wild_type": "E",
+          "mutant": "K",
+          "notation": "E484K",
+          "location": "claims",
+          "protected": true,
+          "context": "substitution of Glu at position 484 with Lys"
+        }
+      ]
+    }
+  ]
 }
-
-# 各靶点查询起始时间（减少不必要的早期查询）
-TARGET_START_OVERRIDE = {
-    "TLR2": "2015-01-01",
-    "CD318": "2003-01-01",
-}
-
-# LLM 配置
-LLM_API_URL = "https://api.gpugeek.com/v1/chat/completions"
-LLM_API_KEY = os.getenv("LLM_API_KEY", "your_key_here")
-LLM_MODEL   = "Vendor3/qwen-turbo"
 ```
 
 ---
 
-## 辅助工具
+## 风险报告结构
 
-```bash
-# 合并多次查询结果，去重
-python scripts/merge_and_clean.py outputs/TLR2_*.csv outputs/CD318_*.csv -o merged.csv
-
-# 按专利号批量下载 PDF
-python scripts/download_pdfs.py outputs/TLR2_patent_sequences_*.csv
+```json
+{
+  "query_type": "mutations",
+  "target": "EGFR",
+  "screening_time": "2026-06-22T11:00:00",
+  "hits": [
+    {
+      "patent_id": "US2020123456A1",
+      "patent_status": "granted",
+      "overall_risk": "high",
+      "mutation_hits": [
+        {
+          "notation": "E484K",
+          "risk_level": "high",
+          "reason": "E484K命中已授权专利的claims，必须规避"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "high_risk_mutations": ["E484K"],
+    "medium_risk_mutations": [],
+    "low_risk_mutations": ["N501Y"],
+    "safe_mutations": [],
+    "conclusion": "E484K命中已授权专利的claims保护，必须规避"
+  }
+}
 ```
 
 ---
 
-## 注意事项
+## 依赖
 
-- 需要 VPN 访问 Catalyst+ API
-- API 单次最多返回 100 条，脚本自动时间分片
-- LLM 验证需要配置有效的 API Key（`LLM_API_KEY` 环境变量）
-- 每次查询成本约 $0.20（qwen-turbo，按专利分组调用）
+- `requests` — API 调用
+- `biopython` — 序列比对（BLOSUM62 替换矩阵 + pairwise alignment）
 
 ---
 
@@ -179,8 +262,13 @@ python scripts/download_pdfs.py outputs/TLR2_patent_sequences_*.csv
 
 | 版本 | 说明 |
 |------|------|
-| v1.0 | 初始版本 |
-| v2.0 | 时间分片、ST.26提取、增强识别 |
-| v2.2 | 可信度分类、结论列、双CSV输出 |
-| v3.1 | LLM 验证（SEQ ID NO + ST.26无标签），三档CSV |
-| **v3.2** | **裸序列提取（关键词上下文过滤 + LLM置信度分流）** |
+| v1.0 | 初始版本：关键词搜索 + 序列提取 |
+| v2.0 | 时间分片、ST.26 提取、增强识别 |
+| v3.2 | LLM 验证、裸序列提取、三档 CSV 输出 |
+| **v4.0** | **重构为专利规避工作流：知识库 + 突变提取 + 风险筛查 + Skill 接口** |
+
+---
+
+## License
+
+Internal use only.
