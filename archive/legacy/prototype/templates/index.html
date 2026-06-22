@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专利序列分析工具 - 增强版</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+        }
+        .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 10px;
+            font-weight: 600;
+        }
+        .main-content {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 20px;
+        }
+        .left-panel, .right-panel {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #555;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border 0.3s;
+        }
+        input:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 32px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            width: 100%;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .hint {
+            color: #888;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            font-weight: 600;
+            color: #666;
+        }
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .progress-box {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        .progress-box.show {
+            display: block;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .log-box {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .log-line {
+            padding: 2px 0;
+        }
+        .file-list {
+            margin-top: 15px;
+        }
+        .file-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-name {
+            font-weight: 600;
+            color: #333;
+        }
+        .file-actions {
+            display: flex;
+            gap: 10px;
+        }
+        .btn-small {
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            font-weight: 600;
+        }
+        .btn-preview {
+            background: #667eea;
+            color: white;
+        }
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+        .history-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .history-item:hover {
+            background: #e9ecef;
+        }
+        .history-time {
+            color: #888;
+            font-size: 12px;
+        }
+        .history-targets {
+            font-weight: 600;
+            color: #333;
+            margin: 5px 0;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-running {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .preview-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            padding: 20px;
+        }
+        .preview-modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .preview-content {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            max-width: 1000px;
+            max-height: 80vh;
+            overflow: auto;
+            width: 100%;
+        }
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .close-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" x-data="queryApp()">
+        <!-- Header -->
+        <div class="header">
+            <h1>
+                🧬 专利序列分析工具
+                <span class="badge">增强版 v4.0</span>
+            </h1>
+            <p class="subtitle">
+                ✅ 异步任务 | ✅ 实时进度 | ✅ 结果预览 | ✅ 查询历史 | ✅ 批量处理
+            </p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel: Query Form -->
+            <div class="left-panel">
+                <h2 style="margin-bottom: 20px;">新建查询</h2>
+                
+                <form @submit.prevent="submitQuery">
+                    <div class="form-group">
+                        <label>靶点名称</label>
+                        <input 
+                            type="text" 
+                            x-model="targets" 
+                            placeholder="例如: TLR2, CD318"
+                            required
+                        >
+                        <p class="hint">多个靶点用逗号分隔，支持批量查询</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>起始日期</label>
+                        <input 
+                            type="date" 
+                            x-model="startDate"
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label>截止日期</label>
+                        <input 
+                            type="date" 
+                            x-model="endDate"
+                        >
+                    </div>
+
+                    <button 
+                        type="submit" 
+                        class="btn"
+                        :disabled="loading"
+                    >
+                        <span x-show="!loading">🚀 开始查询</span>
+                        <span x-show="loading">⏳ 正在运行...</span>
+                    </button>
+                </form>
+
+                <!-- Progress Box -->
+                <div class="progress-box" :class="{ 'show': currentTask }">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong>任务进度</strong>
+                        <span :class="'status-badge status-' + taskStatus" x-text="taskStatus"></span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 50%"></div>
+                    </div>
+                    <div class="log-box">
+                        <template x-for="log in logs" :key="log">
+                            <div class="log-line" x-text="log"></div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Results & History -->
+            <div class="right-panel">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <div class="tab" :class="{ 'active': activeTab === 'results' }" @click="activeTab = 'results'">
+                        📊 查询结果
+                    </div>
+                    <div class="tab" :class="{ 'active': activeTab === 'history' }" @click="activeTab = 'history'; loadHistory()">
+                        📜 历史记录
+                    </div>
+                </div>
+
+                <!-- Results Tab -->
+                <div class="tab-content" :class="{ 'active': activeTab === 'results' }">
+                    <div x-show="outputFiles.length === 0" class="empty-state">
+                        <p>暂无结果</p>
+                        <p style="font-size: 12px; margin-top: 10px;">提交查询后，结果将显示在这里</p>
+                    </div>
+                    
+                    <div class="file-list" x-show="outputFiles.length > 0">
+                        <template x-for="file in outputFiles" :key="file">
+                            <div class="file-item">
+                                <div>
+                                    <div class="file-name" x-text="file"></div>
+                                    <div class="hint">点击预览或下载</div>
+                                </div>
+                                <div class="file-actions">
+                                    <button class="btn-small btn-preview" @click="previewFile(file)">
+                                        👁️ 预览
+                                    </button>
+                                    <a :href="'/api/download/' + file" class="btn-small btn-download" style="text-decoration: none;">
+                                        📥 下载
+                                    </a>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- History Tab -->
+                <div class="tab-content" :class="{ 'active': activeTab === 'history' }">
+                    <div x-show="history.length === 0" class="empty-state">
+                        <p>暂无历史记录</p>
+                    </div>
+                    
+                    <div x-show="history.length > 0">
+                        <template x-for="item in history" :key="item.task_id">
+                            <div class="history-item" @click="loadHistoryItem(item)">
+                                <div class="history-time" x-text="formatTime(item.timestamp)"></div>
+                                <div class="history-targets">
+                                    靶点: <span x-text="item.targets.join(', ')"></span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 5px;">
+                                    <span class="hint" x-text="item.start_date + ' ~ ' + item.end_date"></span>
+                                    <span :class="'status-badge status-' + item.status" x-text="item.status"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Preview Modal -->
+        <div class="preview-modal" :class="{ 'show': showPreview }">
+            <div class="preview-content">
+                <div class="preview-header">
+                    <h3 x-text="previewFilename"></h3>
+                    <button class="close-btn" @click="showPreview = false">✕ 关闭</button>
+                </div>
+                
+                <div style="overflow: auto;">
+                    <table x-show="previewData.length > 0">
+                        <thead>
+                            <tr>
+                                <template x-for="col in previewColumns" :key="col">
+                                    <th x-text="col"></th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="row in previewData" :key="row">
+                                <tr>
+                                    <template x-for="col in previewColumns" :key="col">
+                                        <td x-text="row[col]"></td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                    <div x-show="previewData.length === 0 && previewLoaded" class="empty-state">
+                        <p>📄 文件无数据</p>
+                        <p style="font-size: 12px; margin-top: 10px;">
+                            这个CSV文件只有表头，没有查询到专利数据
+                        </p>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            可能原因：该时间段内没有相关专利
+                        </p>
+                    </div>
+                    <div x-show="!previewLoaded" class="empty-state">
+                        <p>⏳ 加载中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function queryApp() {
+            return {
+                // Form data
+                targets: 'TLR2',
+                startDate: '2020-01-01',
+                endDate: new Date().toISOString().split('T')[0],
+                loading: false,
+                
+                // Task status
+                currentTask: null,
+                taskStatus: '',
+                logs: [],
+                outputFiles: [],
+                
+                // Tabs
+                activeTab: 'results',
+                
+                // History
+                history: [],
+                
+                // Preview
+                showPreview: false,
+                previewFilename: '',
+                previewData: [],
+                previewColumns: [],
+                previewLoaded: false,
+                
+                // WebSocket
+                socket: null,
+                
+                init() {
+                    // Initialize WebSocket
+                    this.socket = io();
+                    
+                    this.socket.on('task_update', (data) => {
+                        console.log('Task update:', data);
+                        
+                        if (data.task_id === this.currentTask) {
+                            this.taskStatus = data.status;
+                            
+                            if (data.message) {
+                                this.logs.push(data.message);
+                                // Auto scroll to bottom
+                                setTimeout(() => {
+                                    const logBox = document.querySelector('.log-box');
+                                    if (logBox) logBox.scrollTop = logBox.scrollHeight;
+                                }, 100);
+                            }
+                            
+                            if (data.status === 'completed') {
+                                this.loading = false;
+                                this.outputFiles = data.output_files || [];
+                                this.activeTab = 'results';
+                            } else if (data.status === 'failed') {
+                                this.loading = false;
+                            }
+                        }
+                    });
+                    
+                    // Load history on init
+                    this.loadHistory();
+                },
+                
+                async submitQuery() {
+                    this.loading = true;
+                    this.logs = ['📡 提交查询请求...'];
+                    this.outputFiles = [];
+                    
+                    try {
+                        const response = await fetch('/api/submit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                targets: this.targets,
+                                start_date: this.startDate,
+                                end_date: this.endDate
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        this.currentTask = data.task_id;
+                        this.taskStatus = data.status;
+                        this.logs.push('✅ ' + data.message);
+                    } catch (error) {
+                        this.loading = false;
+                        this.logs.push('❌ 请求失败: ' + error.message);
+                    }
+                },
+                
+                async loadHistory() {
+                    try {
+                        const response = await fetch('/api/history');
+                        this.history = await response.json();
+                    } catch (error) {
+                        console.error('Failed to load history:', error);
+                    }
+                },
+                
+                loadHistoryItem(item) {
+                    this.targets = item.targets.join(', ');
+                    this.startDate = item.start_date;
+                    this.endDate = item.end_date;
+                    this.outputFiles = item.output_files || [];
+                    this.activeTab = 'results';
+                },
+                
+                async previewFile(filename) {
+                    this.showPreview = true;
+                    this.previewFilename = filename;
+                    this.previewData = [];
+                    this.previewColumns = [];
+                    this.previewLoaded = false;
+                    
+                    try {
+                        const response = await fetch('/api/preview/' + filename);
+                        const data = await response.json();
+                        
+                        this.previewLoaded = true;
+                        
+                        if (data.rows && data.rows.length > 0) {
+                            this.previewData = data.rows;
+                            this.previewColumns = Object.keys(data.rows[0]);
+                        }
+                    } catch (error) {
+                        console.error('Preview failed:', error);
+                        this.previewLoaded = true;
+                    }
+                },
+                
+                formatTime(timestamp) {
+                    const date = new Date(timestamp);
+                    return date.toLocaleString('zh-CN');
+                }
+            }
+        }
+    </script>
+</body>
+</html>

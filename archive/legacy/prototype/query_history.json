@@ -1,0 +1,95 @@
+[
+  {
+    "task_id": "bdd99ffc",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "2023-01-01",
+    "end_date": "2023-12-31",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_121747.csv"
+    ],
+    "timestamp": "2026-06-02T04:17:47.896064",
+    "status": "completed"
+  },
+  {
+    "task_id": "f1bf083b",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "2020-01-01",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_122022.csv"
+    ],
+    "timestamp": "2026-06-02T04:20:22.463497",
+    "status": "completed"
+  },
+  {
+    "task_id": "6e7186c6",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "2020-01-01",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_122635.csv"
+    ],
+    "timestamp": "2026-06-02T04:26:35.752987",
+    "status": "completed"
+  },
+  {
+    "task_id": "ff13ecb6",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "1998-06-10",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_122714.csv"
+    ],
+    "timestamp": "2026-06-02T04:27:14.743041",
+    "status": "completed"
+  },
+  {
+    "task_id": "026cb480",
+    "targets": [
+      "TLR2",
+      "CD318"
+    ],
+    "start_date": "2020-01-01",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_123145.csv",
+      "CD318_patent_sequences_20260602_123145.csv"
+    ],
+    "timestamp": "2026-06-02T04:31:45.706253",
+    "status": "completed"
+  },
+  {
+    "task_id": "c0db5caa",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "1952-06-04",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_20260602_151948.csv"
+    ],
+    "timestamp": "2026-06-02T07:19:48.353367",
+    "status": "completed"
+  },
+  {
+    "task_id": "2653a160",
+    "targets": [
+      "TLR2"
+    ],
+    "start_date": "1952-06-04",
+    "end_date": "2026-06-02",
+    "output_files": [
+      "TLR2_patent_sequences_mock.csv"
+    ],
+    "timestamp": "2026-06-02T07:54:55.114911",
+    "status": "completed"
+  }
+]
