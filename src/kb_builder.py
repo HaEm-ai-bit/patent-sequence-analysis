@@ -45,6 +45,8 @@ def build_knowledge_base(
     client: CatalystClient | None = None,
     kb_dir: Path | None = None,
     force_rebuild: bool = False,
+    ipcs: list[str] | None = None,
+    fulltext: bool = False,
 ) -> dict:
     """
     根据蛋白关键词构建知识库。
@@ -65,6 +67,8 @@ def build_knowledge_base(
         client: API 客户端（可选，不传则自动创建）
         kb_dir: 知识库存储目录
         force_rebuild: 是否强制重建（忽略缓存）
+        ipcs: IPC 分类号过滤（如 ["C12N9/18"]），None 表示不过滤
+        fulltext: 是否开启全文搜索（覆盖更广但准确性略低，默认关闭）
 
     Returns:
         知识库 dict，结构见 PLAN.md
@@ -97,6 +101,8 @@ def build_knowledge_base(
         time_start=time_start,
         time_end=time_end,
         max_pages=max_pages,
+        ipcs=ipcs,
+        fulltext=fulltext,
     )
     print(f"[KB] 找到 {len(summaries)} 个专利摘要, {len(details_map)} 个详情")
 

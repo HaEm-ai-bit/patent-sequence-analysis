@@ -146,6 +146,8 @@ class CatalystClient:
         time_end: str | None = None,
         max_pages: int = 5,
         page_size: int = 100,
+        ipcs: list[str] | None = None,
+        fulltext: bool = False,
     ) -> list[dict]:
         """
         分页拉取全量摘要，支持时间分片突破 100 条限制。
@@ -161,6 +163,8 @@ class CatalystClient:
             time_end: 时间范围结束 "YYYY-MM-DD"，默认今天
             max_pages: 最大分页数
             page_size: 每页条数
+            ipcs: IPC 分类号过滤列表（如 ["C12N9/18", "C07K16/00"]），None 表示不过滤
+            fulltext: 是否开启全文搜索（True=在claims/descriptions里搜，覆盖更广但准确性略低）
 
         Returns:
             去重后的专利摘要列表 [{patentId, ...}, ...]
@@ -168,16 +172,28 @@ class CatalystClient:
         if time_end is None:
             time_end = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
 
+        if fulltext:
+            print(f"      [全文搜索模式] 注意：覆盖更广，但部分结果可能仅偶尔提到关键词")
+
+        def _build_payload(page: int, t_start: str, t_end: str) -> dict:
+            """构建搜索 payload，统一处理所有参数。"""
+            payload: dict = {
+                "keywords": [keyword],
+                "timeRange": {"start": t_start, "end": t_end},
+                "pageSize": page_size,
+                "pageNum": page,
+            }
+            if ipcs:
+                payload["ipcs"] = ipcs
+            if fulltext:
+                payload["isFulltext"] = 1
+            return payload
+
         all_items: list[dict] = []
 
         # 第一轮：尝试分页查询
         for page in range(1, max_pages + 1):
-            payload = {
-                "keywords": [keyword],
-                "timeRange": {"start": time_start, "end": time_end},
-                "pageSize": page_size,
-                "pageNum": page,
-            }
+            payload = _build_payload(page, time_start, time_end)
             result = self.signed_post(SUMMARY_API, payload)
             items = result.get("data") or []
             if not isinstance(items, list):
@@ -215,12 +231,7 @@ class CatalystClient:
             }
 
             for idx, (chunk_start, chunk_end) in enumerate(time_chunks, 1):
-                payload = {
-                    "keywords": [keyword],
-                    "timeRange": {"start": chunk_start, "end": chunk_end},
-                    "pageSize": page_size,
-                    "pageNum": 1,
-                }
+                payload = _build_payload(1, chunk_start, chunk_end)
                 result = self.signed_post(SUMMARY_API, payload)
                 items = result.get("data") or []
 
@@ -285,6 +296,8 @@ class CatalystClient:
         time_start: str = "1900-01-01",
         time_end: str | None = None,
         max_pages: int = 5,
+        ipcs: list[str] | None = None,
+        fulltext: bool = False,
     ) -> tuple[list[dict], dict[str, dict]]:
         """
         一次性完成搜索 + 获取详情，返回 (摘要列表, 详情映射)。
@@ -294,6 +307,8 @@ class CatalystClient:
             time_start: 时间范围起始
             time_end: 时间范围结束
             max_pages: 最大分页数
+            ipcs: IPC 分类号过滤列表
+            fulltext: 是否开启全文搜索
 
         Returns:
             (summaries, details_map)
@@ -301,7 +316,8 @@ class CatalystClient:
             details_map: {patent_id: 专利详情dict}
         """
         summaries = self.search_by_keyword(
-            keyword, time_start=time_start, time_end=time_end, max_pages=max_pages
+            keyword, time_start=time_start, time_end=time_end,
+            max_pages=max_pages, ipcs=ipcs, fulltext=fulltext,
         )
 
         # 收集所有 patentId

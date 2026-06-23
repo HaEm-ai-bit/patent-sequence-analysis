@@ -52,10 +52,23 @@ _BARE_AA_CTX_KW = re.compile(
     re.IGNORECASE,
 )
 
-# ST.26 序列表提取正则
-ST26_SEQ_PATTERN = re.compile(
+# ST.26 / ST.25 序列表提取正则（支持两种格式）
+# 格式1: 老版 ST.25 <400> 标签
+ST25_SEQ_PATTERN = re.compile(
     r'<400>\s*(\d+)(.*?)(?=<210>|<110>|$)',
     re.DOTALL,
+)
+
+# 格式2: 新版 ST.26 <INSDSeq_sequence> 标签
+ST26_INSD_PATTERN = re.compile(
+    r'<SequenceData\s+sequenceIDNumber="(\d+)".*?<INSDSeq_sequence>([^<]+)</INSDSeq_sequence>',
+    re.DOTALL,
+)
+
+# 格式2 补充：单独的 <INSDSeq_sequence> 标签（无 SequenceData 父标签）
+ST26_SEQ_ONLY_PATTERN = re.compile(
+    r'<INSDSeq_sequence>([ACDEFGHIKLMNPQRSTVWYACGTU\s]+?)</INSDSeq_sequence>',
+    re.IGNORECASE | re.DOTALL,
 )
 
 # ST.26 特征描述标签
@@ -147,39 +160,74 @@ def extract_st26_feature_description(text: str, seq_id: str) -> str | None:
 
 def extract_st26_sequences(text: str) -> list[SequenceInfo]:
     """
-    从 ST.26 格式的序列表中提取序列。
+    从序列表中提取序列，支持两种格式：
+    - ST.25 格式: <400> N ... <210> 标签 (旧版)
+    - ST.26 格式: <SequenceData sequenceIDNumber="N"><INSDSeq_sequence>... (新版 XML)
 
     Returns:
         List of SequenceInfo objects
     """
     results = []
+    seen_ids: set[str] = set()
 
+    # ---------- 格式1: 新版 ST.26 XML（<SequenceData> + <INSDSeq_sequence>）----------
+    for m in ST26_INSD_PATTERN.finditer(text):
+        seq_id = m.group(1)
+        raw_seq = re.sub(r'\s+', '', m.group(2)).upper()
+
+        if not raw_seq or len(raw_seq) < 5:
+            continue
+
+        # 判断类型
+        nt_chars = set("ACGTU")
+        aa_extra = set("DEFHIKLMNPQRSVWY")
+        is_nt = set(raw_seq) <= (nt_chars | {'N', 'R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V'})
+        seq_type = "NT" if is_nt else "AA"
+
+        key = f"{seq_id}_{raw_seq[:20]}"
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+
+        context = f"SEQ ID NO: {seq_id} (ST.26 XML) | {raw_seq[:50]}"
+        results.append(SequenceInfo(
+            sequence=raw_seq,
+            seq_type=seq_type,
+            source="ST.26",
+            seq_id=seq_id,
+            context=context,
+        ))
+
+    # ---------- 格式2: 老版 ST.25（<400> 标签）----------
     seq_listing_match = re.search(r'[Ss]equence\s+[Ll]isting', text)
-    if not seq_listing_match:
-        return results
+    if seq_listing_match:
+        seq_section = text[seq_listing_match.start():]
+        matches = ST25_SEQ_PATTERN.findall(seq_section)
 
-    seq_section = text[seq_listing_match.start():]
-    matches = ST26_SEQ_PATTERN.findall(seq_section)
+        for seq_id, seq_text in matches:
+            one_letter = convert_three_letter_to_one(seq_text)
+            if len(one_letter) < 5:
+                continue
 
-    for seq_id, seq_text in matches:
-        one_letter = convert_three_letter_to_one(seq_text)
+            key = f"{seq_id}_{one_letter[:20]}"
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
 
-        if len(one_letter) >= 5:
             seq_type = 'AA' if set(one_letter) <= AA_ALPHABET else 'NT'
             feature_desc = extract_st26_feature_description(seq_section, seq_id)
 
-            context_parts = [f"SEQ ID NO: {seq_id} (from sequence listing)"]
+            context_parts = [f"SEQ ID NO: {seq_id} (ST.25)"]
             if feature_desc:
                 context_parts.append(f"Feature: {feature_desc}")
             context_parts.append(f"Seq: {one_letter[:50]}")
-            context = " | ".join(context_parts)
 
             results.append(SequenceInfo(
                 sequence=one_letter,
                 seq_type=seq_type,
                 source="ST.26",
                 seq_id=seq_id,
-                context=context,
+                context=" | ".join(context_parts),
                 feature_desc=feature_desc,
             ))
 
