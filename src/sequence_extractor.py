@@ -56,8 +56,9 @@ _BARE_AA_CTX_KW = re.compile(
 
 # ST.26 / ST.25 序列表提取正则（支持两种格式）
 # 格式1: 老版 ST.25 <400> 标签
+# 同时捕获 <212> 类型字段（PRT/DNA/RNA）和 <400> 序列内容
 ST25_SEQ_PATTERN = re.compile(
-    r'<400>\s*(\d+)(.*?)(?=<210>|<110>|$)',
+    r'<210>\s*(\d+).*?(?:<212>\s*([A-Z]+).*?)?<400>\s*\d+(.*?)(?=<210>|<110>|$)',
     re.DOTALL,
 )
 
@@ -269,20 +270,34 @@ def extract_st26_sequences(text: str) -> list[SequenceInfo]:
         seq_section = text[seq_listing_match.start():]
         matches = ST25_SEQ_PATTERN.findall(seq_section)
 
-        for seq_id, seq_text in matches:
-            one_letter = convert_three_letter_to_one(seq_text)
-            if len(one_letter) < 5:
-                continue
+        for seq_id, moltype_raw, seq_text in matches:
+            moltype = moltype_raw.strip().upper()  # PRT / DNA / RNA / ""
 
-            key = f"{seq_id}_{one_letter[:20]}"
-            if key in seen_ids:
-                continue
-            seen_ids.add(key)
+            # 先判断类型，再决定如何处理序列内容
+            if moltype == "PRT":
+                seq_type = "AA"
+            elif moltype in ("DNA", "RNA"):
+                seq_type = "NT"
+            else:
+                # 没有 moltype，先尝试三字母转换，转出来的判断
+                seq_type = None
 
-            seq_type = 'AA' if set(one_letter) <= AA_ALPHABET else 'NT'
+            if seq_type == "NT":
+                # DNA/RNA：直接清理空白取纯序列
+                one_letter = re.sub(r'\s+', '', seq_text).upper()
+            else:
+                # 蛋白质或未知：尝试三字母码转单字母
+                one_letter = convert_three_letter_to_one(seq_text)
+                if not one_letter:
+                    # 三字母转换失败，可能本身就是单字母裸序列
+                    one_letter = re.sub(r'\s+', '', seq_text).upper()
+                if seq_type is None:
+                    seq_type = "AA" if set(one_letter) <= AA_ALPHABET else "NT"
+
             feature_desc = extract_st26_feature_description(seq_section, seq_id)
-
             context_parts = [f"SEQ ID NO: {seq_id} (ST.25)"]
+            if moltype:
+                context_parts.append(f"moltype={moltype}")
             if feature_desc:
                 context_parts.append(f"Feature: {feature_desc}")
             context_parts.append(f"Seq: {one_letter[:50]}")
@@ -290,11 +305,23 @@ def extract_st26_sequences(text: str) -> list[SequenceInfo]:
             results.append(SequenceInfo(
                 sequence=one_letter,
                 seq_type=seq_type,
-                source="ST.26",
+                source="ST.25",
                 seq_id=seq_id,
                 context=" | ".join(context_parts),
                 feature_desc=feature_desc,
             ))
+
+            # 核酸序列：尝试翻译为氨基酸
+            if seq_type == "NT":
+                aa_seq = translate_nt_to_aa(one_letter)
+                if aa_seq:
+                    results.append(SequenceInfo(
+                        sequence=aa_seq,
+                        seq_type="AA",
+                        source="ST.25_translated",
+                        seq_id=f"{seq_id}_translated",
+                        context=f"SEQ ID NO: {seq_id} (ST.25 翻译) | NT长度={len(one_letter)} | AA长度={len(aa_seq)} | {aa_seq[:50]}",
+                    ))
 
     return results
 
