@@ -13,6 +13,12 @@
 - **完整蛋白序列**：ST.26 序列表 / SEQ ID NO 引用 / 裸序列提取
 - **突变位点**：从专利文本中提取突变描述（E484K、Glu484Lys 等多种格式）
 
+序列提取支持自动类型判断与翻译：
+- 优先读取 ST.26 XML 的 `<INSDSeq_moltype>` 字段（`DNA` / `RNA` / `AA`）判断序列类型
+- 无 moltype 字段时，通过字符集推断（氨基酸特有字母 DEFHIKLMNPQRSVWY）
+- 核酸序列（DNA/RNA）自动翻译为氨基酸序列（尝试三个读码框，取最长结果）
+- 同时保留原始核酸序列和翻译后的氨基酸序列
+
 每条序列和突变都标注了：
 - `location`：出现在 claims 还是 description 中
 - `protected`：是否受专利保护（granted + claims = 受保护）
@@ -62,8 +68,10 @@
 │     返回：claims + descriptions                             │
 │              │                                              │
 │  ③ sequence_extractor.py                                    │
-│     从 descriptions 提取序列                                 │
+│     从 descriptions + claims 提取序列                        │
 │     • 方式 A：ST.26 XML 标签（<INSDSeq_sequence>）           │
+│       - 读取 <INSDSeq_moltype> 判断 DNA/RNA/AA               │
+│       - DNA/RNA 自动翻译为氨基酸（取最长读码框）              │
 │     • 方式 B：SEQ ID NO 后面跟的字符串                        │
 │     • 方式 C：裸序列（连续大写氨基酸字母）                     │
 │              │                                              │

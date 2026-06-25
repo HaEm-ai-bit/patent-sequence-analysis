@@ -15,6 +15,8 @@
 
 import re
 
+from Bio.Seq import Seq
+
 from .utils import (
     AA_ALPHABET,
     AA_THREE_TO_ONE,
@@ -61,7 +63,9 @@ ST25_SEQ_PATTERN = re.compile(
 
 # 格式2: 新版 ST.26 <INSDSeq_sequence> 标签
 ST26_INSD_PATTERN = re.compile(
-    r'<SequenceData\s+sequenceIDNumber="(\d+)".*?<INSDSeq_sequence>([^<]+)</INSDSeq_sequence>',
+    r'<SequenceData\s+sequenceIDNumber="(\d+)".*?'
+    r'(?:<INSDSeq_moltype>([^<]*)</INSDSeq_moltype>)?.*?'
+    r'<INSDSeq_sequence>([^<]+)</INSDSeq_sequence>',
     re.DOTALL,
 )
 
@@ -78,6 +82,39 @@ ST26_FEATURE_PATTERN = re.compile(
 )
 
 # 稀有氨基酸字母（在英文词中罕见，出现则更可能是真实序列）
+
+
+# ========== 核酸序列翻译 ==========
+
+def translate_nt_to_aa(nt_seq: str) -> str | None:
+    """
+    将核苷酸序列（DNA/RNA）翻译为氨基酸序列。
+
+    策略：
+    - 尝试三个读码框（+1, +2, +3），取最长的翻译结果
+    - 遇到终止密码子截断
+    - 翻译结果长度 < 10 aa 则认为无效
+
+    Args:
+        nt_seq: 核苷酸序列（仅含 ACGTU）
+
+    Returns:
+        氨基酸序列字符串，翻译失败返回 None
+    """
+    nt_seq = nt_seq.upper().replace('U', 'T')  # RNA → DNA
+    best_aa = ""
+
+    for frame in range(3):
+        try:
+            seq = Seq(nt_seq[frame:])
+            # 翻译到第一个终止密码子
+            aa = str(seq.translate(to_stop=True))
+            if len(aa) > len(best_aa):
+                best_aa = aa
+        except Exception:
+            continue
+
+    return best_aa if len(best_aa) >= 10 else None
 _RARE_AA = set("WYHFQ")
 
 
@@ -173,30 +210,58 @@ def extract_st26_sequences(text: str) -> list[SequenceInfo]:
     # ---------- 格式1: 新版 ST.26 XML（<SequenceData> + <INSDSeq_sequence>）----------
     for m in ST26_INSD_PATTERN.finditer(text):
         seq_id = m.group(1)
-        raw_seq = re.sub(r'\s+', '', m.group(2)).upper()
+        moltype = (m.group(2) or "").strip().upper()   # DNA / RNA / AA，可能为空
+        raw_seq = re.sub(r'\s+', '', m.group(3)).upper()
 
         if not raw_seq or len(raw_seq) < 5:
             continue
 
-        # 判断类型
-        nt_chars = set("ACGTU")
-        aa_extra = set("DEFHIKLMNPQRSVWY")
-        is_nt = set(raw_seq) <= (nt_chars | {'N', 'R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V'})
-        seq_type = "NT" if is_nt else "AA"
+        # 优先用 XML 里的 moltype 字段判断类型，其次靠字符集推断
+        if moltype in ("AA", "PRT"):
+            seq_type = "AA"
+        elif moltype in ("DNA", "RNA"):
+            seq_type = "NT"
+        else:
+            # 字符集推断：氨基酸特有字母（DEFHIKLMNPQRSVWY）出现则为 AA
+            is_nt = not bool(set(raw_seq) & set("DEFHIKLMNPQRSVWY"))
+            seq_type = "NT" if is_nt else "AA"
 
         key = f"{seq_id}_{raw_seq[:20]}"
         if key in seen_ids:
             continue
         seen_ids.add(key)
 
-        context = f"SEQ ID NO: {seq_id} (ST.26 XML) | {raw_seq[:50]}"
+        # 核酸序列：尝试翻译为氨基酸
+        aa_seq = None
+        if seq_type == "NT":
+            aa_seq = translate_nt_to_aa(raw_seq)
+
+        context = f"SEQ ID NO: {seq_id} (ST.26 XML) | moltype={moltype or '未知'} | {raw_seq[:50]}"
+
+        # 保存原始核酸序列
         results.append(SequenceInfo(
             sequence=raw_seq,
-            seq_type=seq_type,
+            seq_type="NT",
+            source="ST.26",
+            seq_id=seq_id,
+            context=context,
+        )) if seq_type == "NT" else results.append(SequenceInfo(
+            sequence=raw_seq,
+            seq_type="AA",
             source="ST.26",
             seq_id=seq_id,
             context=context,
         ))
+
+        # 如果翻译成功，额外保存一条氨基酸序列
+        if aa_seq:
+            results.append(SequenceInfo(
+                sequence=aa_seq,
+                seq_type="AA",
+                source="ST.26_translated",
+                seq_id=f"{seq_id}_translated",
+                context=f"SEQ ID NO: {seq_id} (ST.26 XML 翻译) | NT长度={len(raw_seq)} | AA长度={len(aa_seq)} | {aa_seq[:50]}",
+            ))
 
     # ---------- 格式2: 老版 ST.25（<400> 标签）----------
     seq_listing_match = re.search(r'[Ss]equence\s+[Ll]isting', text)
