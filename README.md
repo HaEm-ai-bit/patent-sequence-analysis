@@ -10,14 +10,20 @@
 
 根据蛋白关键词（如 EGFR、TLR2）搜索相关专利，提取两类信息并构建本地知识库：
 
-- **完整蛋白序列**：ST.26 序列表 / SEQ ID NO 引用 / 裸序列提取
+- **完整蛋白序列**：ST.26 / ST.25 序列表 / SEQ ID NO 引用 / 裸序列提取
 - **突变位点**：从专利文本中提取突变描述（E484K、Glu484Lys 等多种格式）
 
-序列提取支持自动类型判断与翻译：
-- 优先读取 ST.26 XML 的 `<INSDSeq_moltype>` 字段（`DNA` / `RNA` / `AA`）判断序列类型
-- 无 moltype 字段时，通过字符集推断（氨基酸特有字母 DEFHIKLMNPQRSVWY）
-- 核酸序列（DNA/RNA）自动翻译为氨基酸序列（尝试三个读码框，取最长结果）
-- 同时保留原始核酸序列和翻译后的氨基酸序列
+序列提取支持两种序列表格式，逻辑完全统一：
+
+| | ST.26（2022年后新专利） | ST.25（2022年前旧专利） |
+|---|---|---|
+| 类型判断 | 读 `<INSDSeq_moltype>` 字段 | 读 `<212>` 标签 |
+| 无类型字段时 | 字符集推断 | 字符集推断 |
+| DNA / RNA | 保存原序列 + 自动翻译为氨基酸 | 保存原序列 + 自动翻译为氨基酸 |
+| 蛋白质 | 直接保存单字母序列 | 三字母码转单字母后保存 |
+
+- 核酸序列自动翻译：尝试三个读码框（+1/+2/+3），取最长结果，翻译结果 ≥10aa 才保留
+- 同时保留原始核酸序列（`source=ST.26`）和翻译后氨基酸序列（`source=ST.26_translated`）
 
 每条序列和突变都标注了：
 - `location`：出现在 claims 还是 description 中
@@ -69,11 +75,12 @@
 │              │                                              │
 │  ③ sequence_extractor.py                                    │
 │     从 descriptions + claims 提取序列                        │
-│     • 方式 A：ST.26 XML 标签（<INSDSeq_sequence>）           │
-│       - 读取 <INSDSeq_moltype> 判断 DNA/RNA/AA               │
-│       - DNA/RNA 自动翻译为氨基酸（取最长读码框）              │
-│     • 方式 B：SEQ ID NO 后面跟的字符串                        │
-│     • 方式 C：裸序列（连续大写氨基酸字母）                     │
+│     • ST.26（新）：读 <INSDSeq_moltype> 判断 DNA/RNA/AA      │
+│     • ST.25（旧）：读 <212> 标签判断 PRT/DNA/RNA             │
+│     • 无类型字段：字符集推断                                  │
+│     • DNA/RNA 自动翻译氨基酸（三读码框取最长）                │
+│     • SEQ ID NO 后面跟的字符串                                │
+│     • 裸序列（连续大写氨基酸字母）                            │
 │              │                                              │
 │  ④ mutation_extractor.py                                    │
 │     从 claims + descriptions 提取突变位点                    │
