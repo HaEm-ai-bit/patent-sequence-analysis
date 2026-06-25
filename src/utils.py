@@ -119,7 +119,7 @@ def normalize_patent_status(status: str) -> str:
     if not status:
         return "unknown"
     s = status.lower().strip()
-    if "grant" in s or "授权" in s:
+    if "grant" in s or "授权" in s or s == "active":
         return "granted"
     if "pend" in s or "审查" in s or "申请" in s:
         return "pending"
