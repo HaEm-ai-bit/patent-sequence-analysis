@@ -20,8 +20,8 @@ SUMMARY_API = "/patent/pass/advanced"
 DETAIL_API = "/patent/pass/ids/detail"
 
 # 建议改为环境变量读取，避免把凭证硬编码进代码库
-ACCESS_KEY = "CPTkp6wqyWrzdpB9iE2PvuZKRNDGZ0kj"
-ACCESS_SECRET = "jaRACFfGQAdeSGELWu4IQEYZLYTjD5UU"
+ACCESS_KEY = "your_access_key_here"
+ACCESS_SECRET = "your_access_secret_here"
 
 # ============ LLM Agent 配置 ============
 LLM_API_URL = "https://api.gpugeek.com/v1/chat/completions"
